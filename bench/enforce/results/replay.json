@@ -1,0 +1,43 @@
+{
+  "ceiling_usd": 1.0,
+  "cost_per_call_usd": 0.05,
+  "requests": 40,
+  "scenarios": [
+    {
+      "scenario": "check-then-act race",
+      "baseline_allowed": 40,
+      "baseline_spend_usd": 2.0,
+      "fusegrid_allowed": 20,
+      "fusegrid_spend_usd": 1.0,
+      "ceiling_held": true,
+      "note": "reservation is a single atomic operation, so concurrent requests cannot all observe the same balance"
+    },
+    {
+      "scenario": "post-hoc accounting",
+      "baseline_allowed": 20,
+      "baseline_spend_usd": 1.95,
+      "fusegrid_allowed": 19,
+      "fusegrid_spend_usd": 0.95,
+      "ceiling_held": true,
+      "note": "the maximum is reserved before the call, so an expensive request cannot slip through remaining headroom"
+    },
+    {
+      "scenario": "best-effort recording",
+      "baseline_allowed": 40,
+      "baseline_spend_usd": 2.0,
+      "fusegrid_allowed": 0,
+      "fusegrid_spend_usd": 0.0,
+      "ceiling_held": true,
+      "note": "fails closed: 40 requests denied while the store was down, so no unenforced spend was possible"
+    },
+    {
+      "scenario": "unpriced model",
+      "baseline_allowed": 40,
+      "baseline_spend_usd": 2.0,
+      "fusegrid_allowed": 0,
+      "fusegrid_spend_usd": 0.0,
+      "ceiling_held": true,
+      "note": "an unknown model has no maximum, so nothing can be reserved: 40 denied rather than costed at zero"
+    }
+  ]
+}

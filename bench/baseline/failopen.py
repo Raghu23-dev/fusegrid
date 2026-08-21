@@ -243,8 +243,10 @@ async def main() -> None:
         await pattern_unpriced(concurrency),
     ]
 
-    print(f"ceiling ${CEILING_USD:.2f}  ·  ${COST_PER_CALL_USD:.2f}/call  ·  "
-          f"{concurrency} requests  ·  {int(CEILING_USD / COST_PER_CALL_USD)} calls should be allowed\n")
+    print(
+        f"ceiling ${CEILING_USD:.2f}  ·  ${COST_PER_CALL_USD:.2f}/call  ·  "
+        f"{concurrency} requests  ·  {int(CEILING_USD / COST_PER_CALL_USD)} calls should be allowed\n"
+    )
     print(f"{'pattern':<26}{'allowed':>8}{'spend':>9}{'overrun':>10}  failed open")
     print("-" * 68)
     for r in results:
