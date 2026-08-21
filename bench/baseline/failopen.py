@@ -167,7 +167,11 @@ async def pattern_best_effort(concurrency: int) -> Result:
         if await ledger.read() >= CEILING_USD:
             return False
         await asyncio.sleep(0.02)
-        try:
+        # Written as try/except/pass rather than contextlib.suppress ON PURPOSE. This is a
+        # reproduction of the pattern found in real code, and real code writes it this way —
+        # with a comment exactly like the one below. Rewriting it as suppress() would make the
+        # baseline tidier than the thing it is supposed to be a faithful copy of.
+        try:  # noqa: SIM105
             await ledger.write(COST_PER_CALL_USD)
         except RuntimeError:
             pass  # "don't fail the user's request over telemetry"
