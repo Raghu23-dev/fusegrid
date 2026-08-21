@@ -4,6 +4,8 @@ Generated from Conventional Commits. Notable changes per release.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-21
+
 ### Fixed
 - **Security: a negative `max_tokens` bypassed the spend ceiling.** `ModelPrice.max_cost` and
   `.actual_cost` did not clamp at zero, so `int(-5 * 0.8) = -4` output tokens priced a request as
