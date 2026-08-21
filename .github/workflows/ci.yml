@@ -1,0 +1,32 @@
+name: ci
+on:
+  push: { branches: [main, develop] }
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: astral-sh/setup-uv@v7
+        with: { enable-cache: true }
+      - run: uv sync --all-extras --dev
+      - name: lint
+        run: uv run ruff check .
+      - name: format
+        run: uv run ruff format --check .
+      - name: types
+        run: uv run mypy .
+      - name: correctness tests
+        run: uv run pytest tests/correctness -q
+      - name: adversarial tests
+        run: uv run pytest tests/adversarial -q
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }

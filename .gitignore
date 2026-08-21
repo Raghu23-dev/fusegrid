@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+# bench/ is NEVER ignored — see bench/README.md
