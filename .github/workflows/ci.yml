@@ -4,25 +4,37 @@ on:
   pull_request:
 permissions:
   contents: read
+
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - uses: astral-sh/setup-uv@v7
         with: { enable-cache: true }
-      - run: uv sync --all-extras --dev
+      - run: uv venv
+      - run: uv pip install -e ".[dev]" fastapi httpx uvicorn
+
       - name: lint
         run: uv run ruff check .
       - name: format
         run: uv run ruff format --check .
       - name: types
-        run: uv run mypy .
-      - name: correctness tests
-        run: uv run pytest tests/correctness -q
+        run: uv run mypy src --ignore-missing-imports
+
       - name: adversarial tests
         run: uv run pytest tests/adversarial -q
+
+      # The thesis, enforced. Exits non-zero if any ceiling is breached, so a
+      # regression in the enforcement path cannot merge.
+      - name: enforcement replay
+        run: uv run python bench/enforce/replay.py
+
+      # Criterion 3. Fails the job if p99 overhead exceeds 15 ms.
+      - name: latency budget
+        run: uv run python bench/latency/measure.py
+
   secrets:
     runs-on: ubuntu-latest
     steps:

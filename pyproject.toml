@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Raghuram P" }]
-dependencies = []
+dependencies = ["fastapi>=0.115", "httpx>=0.27", "uvicorn>=0.32"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.8", "mypy>=1.13"]
@@ -19,8 +19,26 @@ build-backend = "hatchling.build"
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.per-file-ignores]
+# Benchmarks print tables for humans and use f-strings with format specs throughout.
+# Their job is legible output, not library hygiene.
+"bench/**" = ["T201", "E501", "N806"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+  # Docstrings deliberately use −, ≤, Σ and en dashes. This module documents a
+  # mathematical invariant, and writing it in ASCII would make it less clear, which is
+  # the opposite of the rule's intent.
+  "RUF002",
+  "RUF003",
+  # LedgerUnavailable and UnpricedModel read correctly at the call site
+  # (`except LedgerUnavailable:`). An -Error suffix would add noise without clarity.
+  "N818",
+  # Any store failure must fail closed, so a broad except is the correct behaviour
+  # here and is immediately re-raised as LedgerUnavailable.
+  "BLE001",
+]
 
 [tool.mypy]
 strict = true
@@ -28,8 +46,9 @@ warn_unreachable = true
 
 [tool.pytest.ini_options]
 # NOTE: in a file named pytest.ini this section must be [pytest]; inside
-# pyproject.toml it must be [tool.pytest.ini_options]. Getting this wrong makes
-# every setting here silently inert — a real bug observed in a production repo.
+# pyproject.toml it must be [tool.pytest.ini_options]. Getting this wrong makes every
+# setting here silently inert — a real bug observed in a production repo.
+pythonpath = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--strict-markers"
