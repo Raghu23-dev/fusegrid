@@ -130,7 +130,11 @@ async def stub_completions(request: Request) -> dict[str, Any]:
     # an upstream 4xx — and correctly released the reservation for, so no budget was consumed by
     # my own misconfiguration. Worth noting: the failure mode was safe.
     body = await request.json()
-    max_out = int(body.get("max_tokens") or 256)
+    # max(0, ...) because a negative max_tokens made completion_tokens negative, which the
+    # pricing layer treated as a credit — the request was served for $0.000000 past an
+    # exhausted ceiling. The proxy now rejects negatives before reaching here; this stays
+    # so the stub cannot manufacture a negative usage block on its own.
+    max_out = max(0, int(body.get("max_tokens") or 256))
     # Spend 80% of the reservation. Not 100%, so settlement visibly releases the difference —
     # which is the part of the design that stops a conservative reservation from permanently
     # consuming budget it never used.
@@ -484,8 +488,9 @@ Post-hoc accounting overruns. Reserve-then-settle refuses the 6th request.</p>
 
 curl {{HOST}}/v1/budgets/demo-tight     <span class="n"># watch remaining_usd fall</span>
 curl -X POST {{HOST}}/demo/reset        <span class="n"># put it back for the next visitor</span></pre>
-<p>Keep going and the ceiling refuses you with <code>402</code> and a
-<code>Retry-After</code> &mdash; before the spend, not after it.</p>
+<p>Keep going and the ceiling refuses you with <code>429</code> and a
+<code>budget_exceeded</code> body carrying <code>remaining_usd</code> and
+<code>ceiling_usd</code> &mdash; before the spend, not after it.</p>
 
 <h2>Budgets on this instance</h2>
 <table><thead><tr><th>budget_key</th><th>ceiling</th></tr></thead><tbody>

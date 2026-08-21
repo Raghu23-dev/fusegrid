@@ -127,6 +127,21 @@ def create_app(
         #    reserved, so it cannot be admitted. This is measured failure #4 — a
         #    default price would silently mis-enforce for the newest models.
         max_output = payload.get("max_tokens")
+        # A negative max_tokens is a CALLER ERROR, rejected before pricing. Left to the
+        # pricing layer it raised from library code and would surface as a 500; more
+        # importantly, it used to be priced as a credit and served free past an exhausted
+        # ceiling. `isinstance(True, int)` is True in Python, so bools are excluded
+        # explicitly — `max_tokens: true` is not a token count.
+        if max_output is not None and (
+            isinstance(max_output, bool) or not isinstance(max_output, int) or max_output < 0
+        ):
+            log.warning("denied: invalid max_tokens %r (budget=%s)", max_output, budget_key)
+            return _error(
+                "invalid_request",
+                f"max_tokens must be a non-negative integer, got {max_output!r}. A negative "
+                "value would price the request as a credit and bypass the ceiling.",
+                400,
+            )
         try:
             max_cost = pricing.max_cost(
                 model,
@@ -322,6 +337,10 @@ def _cost_from_usage(pricing: Pricing, model: str, usage: dict[str, Any]) -> flo
     try:
         return pricing.actual_cost(model, int(prompt or 0), int(completion or 0))
     except (UnpricedModel, TypeError, ValueError):
+        # InvalidTokenCount is a ValueError, so a usage block reporting NEGATIVE tokens
+        # lands here and settles at the full reservation. That is the safe direction: a
+        # provider (or a compromised upstream) reporting -1000 completion tokens must not
+        # be able to hand budget back. Untrustworthy usage is missing usage.
         return float("inf")
 
 
