@@ -57,7 +57,9 @@ def build(
 def ask(
     client: TestClient, *, model: str = MODEL, max_tokens: int = 100, key: str = KEY
 ) -> httpx.Response:
-    return client.post(
+    # Explicitly typed: TestClient.post is annotated to return Any, so returning it directly
+    # silently widens this helper's contract and every caller loses type checking on the result.
+    response: httpx.Response = client.post(
         "/v1/chat/completions",
         json={
             "model": model,
@@ -66,6 +68,7 @@ def ask(
         },
         headers={"x-fusegrid-budget": key},
     )
+    return response
 
 
 class TestEnforcementCannotBeBypassed:
