@@ -20,6 +20,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
+# The deployed landing page is one HTML/CSS literal. Wrapping CSS rules to satisfy a column
+# limit makes them harder to read, not easier.
+"api/index.py" = ["E501"]
 # Benchmarks print tables for humans and use f-strings with format specs throughout.
 # Their job is legible output, not library hygiene.
 "bench/**" = ["T201", "E501", "N806"]
