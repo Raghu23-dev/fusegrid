@@ -109,6 +109,53 @@ class TestErrorsAreDistinguishable:
         assert r.json()["error"]["code"] == "unpriced_model"
         assert after == before
 
+    def test_negative_max_tokens_cannot_buy_a_free_completion(self) -> None:
+        """The deployed instance served `max_tokens: -5` for $0.000000, unbounded.
+
+        Against a budget with $0.0084 left, a well-formed request got 429 while this one
+        got 200 and a real completion body. Only end-user testing the live instance found
+        it — the unit suite had always passed a plausible positive value.
+        """
+        for _ in range(20):
+            client.post("/v1/chat/completions", json=body())
+        assert client.post("/v1/chat/completions", json=body()).status_code == 429
+        exhausted = client.get("/v1/budgets/demo-tight").json()["spent_usd"]
+
+        for _ in range(10):
+            r = client.post("/v1/chat/completions", json=body(max_tokens=-5))
+            assert r.status_code == 400, "a negative max_tokens must not be served"
+            assert "stub upstream response" not in r.text
+
+        assert client.get("/v1/budgets/demo-tight").json()["spent_usd"] == exhausted
+
+
+class TestTheLandingPageDoesNotLie:
+    """The page is the only documentation a visitor reads, so it is load-bearing.
+
+    It told visitors refusal was `402` with a `Retry-After` header. Actual behaviour is
+    `429` with neither — a stranger following the page would have written a client that
+    never matches. The thesis doc said 429 all along, so the page contradicted the spec
+    rather than the code.
+    """
+
+    def test_the_status_code_the_page_promises_is_the_one_returned(self) -> None:
+        page = client.get("/").text
+        for _ in range(20):
+            client.post("/v1/chat/completions", json=body())
+        refusal = client.post("/v1/chat/completions", json=body())
+
+        assert refusal.status_code == 429
+        assert "<code>429</code>" in page
+        assert "<code>402</code>" not in page, "the page promises a status it never returns"
+
+    def test_the_page_does_not_promise_headers_that_are_absent(self) -> None:
+        for _ in range(20):
+            client.post("/v1/chat/completions", json=body())
+        refusal = client.post("/v1/chat/completions", json=body())
+
+        if "Retry-After" not in refusal.headers:
+            assert "Retry-After" not in client.get("/").text
+
 
 class TestPricingIsCalibrated:
     def test_the_first_request_is_not_refused(self) -> None:
