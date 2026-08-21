@@ -150,6 +150,27 @@ class TestTheLandingPageDoesNotLie:
         assert "<code>429</code>" in page
         assert "<code>402</code>" not in page, "the page promises a status it never returns"
 
+    def test_the_version_shown_is_not_stale(self) -> None:
+        """The page and /health advertised 0.1.0 across v0.2.0, v0.3.0 and v0.3.1.
+
+        A visitor comparing the advertised version against the repo's releases sees a
+        deployment three releases behind, which is not what is deployed. The number is
+        hand-maintained, so it drifts silently at every release; this pins it to the
+        CHANGELOG's newest released heading.
+        """
+        import re
+        from pathlib import Path
+
+        import index as api
+
+        changelog = (Path(__file__).resolve().parents[2] / "CHANGELOG.md").read_text()
+        released = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.M)
+        assert released, "CHANGELOG has no released version heading to compare against"
+        newest = released[0]
+        assert newest == api.VERSION, (
+            f"page advertises {api.VERSION} but the newest release is {newest}"
+        )
+
     def test_the_page_does_not_promise_headers_that_are_absent(self) -> None:
         for _ in range(20):
             client.post("/v1/chat/completions", json=body())
