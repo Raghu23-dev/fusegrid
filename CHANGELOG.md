@@ -4,6 +4,17 @@ Generated from Conventional Commits. Notable changes per release.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-08-21
+
+### Fixed
+- **CI type-checked only `src/`**, so `api/` and `tests/` had never been checked. Widening to
+  `mypy .` surfaced a real latent bug in deployed code: `/demo/overrun` dereferenced
+  `decision.reservation.id` after testing only `decision.allowed`. The flag being true does not
+  prove the reservation is present — the proxy's own handler tests both for exactly that reason.
+- The landing page and `/health` advertised `0.1.0` across three releases. The version is
+  hand-maintained, so it drifted silently; a test now pins it to this CHANGELOG's newest
+  released heading.
+
 ## [0.3.0] — 2026-08-21
 
 ### Fixed

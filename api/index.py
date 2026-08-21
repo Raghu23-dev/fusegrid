@@ -48,7 +48,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("fusegrid")
 
-VERSION = "0.1.0"
+VERSION = "0.3.1"
 
 #: Priced so that a visitor reaches the ceiling in a handful of requests. Real frontier pricing
 #: would need thousands of calls to demonstrate anything.
