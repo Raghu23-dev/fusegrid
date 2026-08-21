@@ -2,6 +2,15 @@
 
 **A fuse for LLM spend.** Budgets that actually block, enforced before the upstream call.
 
+**Live:** https://fusegrid.vercel.app — spend a real ceiling down and watch it refuse before the
+charge, or get the whole result in one request:
+
+```bash
+curl "https://fusegrid.vercel.app/demo/overrun?concurrency=20"
+# post-hoc: $0.40 spent against a $0.10 ceiling — 300% over
+# enforced: $0.10, 0% over, 5 allowed / 15 refused
+```
+
 You configure a spend limit, exceed it, and nothing stops the request — you find out on
 the invoice. This is not a bug in one product; it is a property of enforcing a limit
 against a cost that is unknowable until after the money is spent.
