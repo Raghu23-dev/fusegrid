@@ -208,5 +208,15 @@ class Ledger:
     def open_reservations(self) -> int:
         return len(self._open)
 
+    def clear_reservations(self) -> None:
+        """Forget all open reservations.
+
+        Pairs with `Store.clear` for tests and resettable demos. Separate from the store's
+        clear because the two hold different state: the store holds committed spend, the
+        ledger holds what is outstanding. Clearing one without the other leaves the invariant
+        `committed + open <= ceiling` computed from mismatched halves.
+        """
+        self._open.clear()
+
     def spent(self, key: str) -> float:
         return self._store.spent(key)

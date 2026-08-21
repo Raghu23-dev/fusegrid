@@ -99,7 +99,7 @@ def main() -> None:
     spread = max(p99s) - min(p99s)
 
     print()
-    print(f"p99 across runs: {min(p99s):.4f}–{max(p99s):.4f} ms  (spread {spread:.4f} ms)")
+    print(f"p99 across runs: {min(p99s):.4f} to {max(p99s):.4f} ms  (spread {spread:.4f} ms)")
     print(f"worst p99:       {worst:.4f} ms")
     print(f"threshold:       {THRESHOLD_MS:.1f} ms")
     print()

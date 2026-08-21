@@ -66,9 +66,25 @@ def estimate_input_tokens(payload: dict[str, Any]) -> int:
         return 1
 
 
-def create_app(ledger: Ledger, pricing: Pricing, config: Config) -> FastAPI:
+def create_app(
+    ledger: Ledger,
+    pricing: Pricing,
+    config: Config,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> FastAPI:
+    """Build the proxy.
+
+    `client` exists so a caller can supply their own transport — a stub upstream for a live
+    demo, a recording transport for a test, or a client with different connection limits. The
+    default is unchanged, so no existing caller is affected.
+
+    Injecting the client rather than the base URL keeps `Config` frozen and declarative, and
+    means the proxy under test is the proxy that ships: the request still goes through the
+    full client/response cycle instead of a shortcut for the caller's convenience.
+    """
     app = FastAPI(title="fusegrid", version="0.1.0")
-    client = httpx.AsyncClient(timeout=config.request_timeout_seconds)
+    client = client or httpx.AsyncClient(timeout=config.request_timeout_seconds)
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -136,6 +152,22 @@ def create_app(ledger: Ledger, pricing: Pricing, config: Config) -> FastAPI:
                 "the spend ledger is unreachable, so the budget cannot be enforced. "
                 "fusegrid denies rather than allowing unenforced spend.",
                 503,
+            )
+
+        # An unknown key is a CALLER ERROR, not an exhausted budget. Returning it as 429
+        # with "only $0.000000 of $0.00 remains" is indistinguishable from a genuinely
+        # spent-out budget, and sends whoever is debugging to look at their spend instead of
+        # their key name. Found by wiring the live deployment, where a typo'd budget_key
+        # produced a message describing a ceiling that does not exist.
+        if decision.reason == "unknown_budget_key":
+            log.warning("denied: unknown budget key %s", budget_key)
+            return _error(
+                "unknown_budget_key",
+                f"no budget is configured for key {budget_key!r}. This is a configuration "
+                "error, not an exhausted budget: no ceiling exists to enforce, so the "
+                "request is refused rather than admitted unenforced.",
+                400,
+                extra={"budget_key": budget_key},
             )
 
         if not decision.allowed or decision.reservation is None:

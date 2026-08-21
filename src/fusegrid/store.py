@@ -85,6 +85,16 @@ class MemoryStore:
         with self._lock:
             return to_usd(self._held.get(key, 0))
 
+    def clear(self) -> None:
+        """Drop all recorded spend. Ceilings live in the Ledger and are untouched.
+
+        For tests and for resettable demos. Takes the same lock as `reserve`, because a clear
+        racing a reservation could otherwise leave a reservation outstanding against a store
+        that has forgotten it.
+        """
+        with self._lock:
+            self._held.clear()
+
 
 # Reserve, atomically, inside Redis. Returned as a pair so the caller learns the
 # remaining balance in the same round trip rather than issuing a second read that

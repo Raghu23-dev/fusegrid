@@ -111,7 +111,10 @@ class TestEnforcementCannotBeBypassed:
     def test_unknown_budget_key_is_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client, _, _ = build(monkeypatch)
         r = ask(client, key="no-such-team", max_tokens=1)
-        assert r.status_code == 429
+        # 400, not 429. An unconfigured key is a caller/config error; 429 with "only $0.000000
+        # of $0.00 remains" is indistinguishable from a genuinely exhausted budget and sends
+        # whoever is debugging to look at their spend instead of their key name.
+        assert r.status_code == 400
         assert r.json()["error"]["code"] == "unknown_budget_key"
 
     def test_ledger_failure_denies_with_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,9 +193,12 @@ class TestHostileInput:
         r = client.post(
             "/v1/chat/completions", json={"model": MODEL, "max_tokens": 1, "messages": []}
         )
-        # 'default' is not a configured key, so it is denied rather than unlimited.
-        assert r.status_code == 429
+        # 'default' is not a configured key, so it is denied rather than unlimited. The status
+        # is 400 (configuration error) rather than 429 (budget exhausted) — but the property
+        # this test protects is unchanged: absent header must not mean absent ceiling.
+        assert r.status_code == 400
         assert r.json()["error"]["code"] == "unknown_budget_key"
+        assert "not an exhausted budget" in r.json()["error"]["message"]
 
     def test_input_estimate_is_biased_high(self) -> None:
         from fusegrid.proxy import estimate_input_tokens
