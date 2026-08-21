@@ -15,3 +15,4 @@ build/
 *.key
 .DS_Store
 # bench/ is NEVER ignored — see bench/README.md
+.vercel
