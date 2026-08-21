@@ -126,6 +126,83 @@ class TestEnforcementCannotBeBypassed:
         assert r.json()["error"]["code"] == "ledger_unavailable"
 
 
+class TestNegativeMaxTokensCannotBypassTheCeiling:
+    """A caller-supplied negative max_tokens was priced as a CREDIT.
+
+    Found by end-user testing the deployed instance, not by this suite: every test above
+    passes a plausible positive value. Against an exhausted ceiling, `max_tokens: -5`
+    returned 200 with a real completion body and moved spend by exactly $0.000000, so a
+    stranger got unbounded free requests where a well-formed one got 429.
+
+    Root cause was two unguarded multiplications in pricing.py, not the demo stub — so
+    these attack the library through the proxy.
+    """
+
+    @pytest.mark.parametrize("bad", [-1, -5, -1_000_000])
+    def test_negative_max_tokens_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, bad: int
+    ) -> None:
+        client, store, _ = build(monkeypatch)
+        r = ask(client, max_tokens=bad)
+        assert r.status_code == 400, f"max_tokens={bad} must be refused, not served"
+        assert r.json()["error"]["code"] == "invalid_request"
+        assert store.spent(KEY) == pytest.approx(0.0)
+
+    def test_negative_max_tokens_cannot_be_served_past_an_exhausted_ceiling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exact reproduction: exhaust the budget, then attack it."""
+        client, store, _ = build(monkeypatch)
+        while ask(client, max_tokens=400).status_code == 200:
+            pass
+        exhausted = store.spent(KEY)
+        assert ask(client, max_tokens=400).status_code == 429, "budget must be exhausted"
+
+        for _ in range(10):
+            r = ask(client, max_tokens=-5)
+            assert r.status_code == 400, "a negative value must not buy a completion"
+            assert "stub upstream response" not in r.text
+
+        assert store.spent(KEY) == pytest.approx(exhausted), "spend must not move"
+        assert store.spent(KEY) <= CEILING + 1e-6
+
+    def test_zero_max_tokens_is_still_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """0 is a legitimate value, so the guard must reject only NEGATIVES.
+
+        A fix that clamped everything non-positive would break a caller asking for no
+        completion tokens, which is a real (if unusual) request.
+        """
+        client, _, _ = build(monkeypatch)
+        assert ask(client, max_tokens=0).status_code == 200
+
+    def test_boolean_max_tokens_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`isinstance(True, int)` is True in Python, so bools need excluding explicitly."""
+        client, _, _ = build(monkeypatch)
+        r = client.post(
+            "/v1/chat/completions",
+            json={"model": MODEL, "max_tokens": True, "messages": [{"role": "user", "c": "x"}]},
+            headers={"x-fusegrid-budget": KEY},
+        )
+        assert r.status_code == 400
+        assert r.json()["error"]["code"] == "invalid_request"
+
+    def test_upstream_reporting_negative_usage_settles_at_the_reservation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other half of the hole: a hostile UPSTREAM cannot hand budget back.
+
+        The proxy now rejects negative max_tokens, but usage arrives from the provider and
+        is not the caller's to validate. Negative reported tokens must be treated as
+        untrustworthy — settle at the full reservation — never as a refund.
+        """
+        client, store, _ = build(
+            monkeypatch,
+            usage={"prompt_tokens": -10_000, "completion_tokens": -10_000, "total_tokens": 0},
+        )
+        assert ask(client, max_tokens=100).status_code == 200
+        assert store.spent(KEY) > 0.0, "negative usage must not produce a credit"
+
+
 class TestReservationLifecycle:
     def test_settlement_releases_the_unused_reservation(
         self, monkeypatch: pytest.MonkeyPatch

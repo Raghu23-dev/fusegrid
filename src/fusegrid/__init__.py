@@ -5,11 +5,12 @@ blocked rather than discovered on an invoice.
 """
 
 from .ledger import Decision, Ledger, LedgerUnavailable, Reservation
-from .pricing import ModelPrice, Pricing, UnpricedModel
+from .pricing import InvalidTokenCount, ModelPrice, Pricing, UnpricedModel
 from .store import MemoryStore, RedisStore
 
 __all__ = [
     "Decision",
+    "InvalidTokenCount",
     "Ledger",
     "LedgerUnavailable",
     "MemoryStore",
