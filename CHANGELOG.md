@@ -4,6 +4,8 @@ Generated from Conventional Commits. Notable changes per release.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-08-21
+
 ## [0.3.1] — 2026-08-21
 
 ### Fixed
