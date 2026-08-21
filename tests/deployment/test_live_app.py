@@ -20,7 +20,9 @@ from index import CEILINGS, DEMO_MODEL, app
 client = TestClient(app)
 
 
-def body(key: str = "demo-tight", model: str = DEMO_MODEL, max_tokens: int = 256) -> dict:
+def body(
+    key: str = "demo-tight", model: str = DEMO_MODEL, max_tokens: int = 256
+) -> dict[str, object]:
     return {
         "model": model,
         "budget_key": key,

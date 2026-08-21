@@ -21,7 +21,11 @@ jobs:
       - name: format
         run: uv run ruff format --check .
       - name: types
-        run: uv run mypy src --ignore-missing-imports
+        # Whole repo, not just src/. Checking only src/ meant api/ and tests/ were never
+        # type-checked, which hid a real latent bug: the /demo/overrun handler dereferenced
+        # decision.reservation.id after testing only decision.allowed, where the proxy's own
+        # handler correctly tests both.
+        run: uv run mypy . --ignore-missing-imports
 
       - name: adversarial tests
         run: uv run pytest tests/adversarial -q

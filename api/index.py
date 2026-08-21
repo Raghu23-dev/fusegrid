@@ -295,7 +295,11 @@ async def demo_overrun(concurrency: int = 20) -> dict[str, Any]:
     async def enforced_call() -> None:
         nonlocal refused, allowed
         decision = enforced_ledger.reserve("k", cost_per_call)
-        if not decision.allowed:
+        # Check the reservation, not just the flag. `allowed` being true does not prove
+        # `reservation` is present, and the proxy's own handler tests both for that reason —
+        # this demo endpoint tested only the flag and would have raised AttributeError on any
+        # path that returned allowed without one. Found by widening mypy past src/.
+        if not decision.allowed or decision.reservation is None:
             refused += 1
             return
         await asyncio.sleep(0.001)
