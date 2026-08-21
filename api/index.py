@@ -39,7 +39,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from fusegrid import Ledger, MemoryStore, ModelPrice, Pricing
+from fusegrid import Ledger, MemoryStore, ModelPrice, Pricing, RedisStore
 from fusegrid.proxy import Config, create_app
 
 logging.basicConfig(
@@ -74,9 +74,44 @@ CEILINGS = {
     "demo-generous": 5.00,
 }
 
-_store = MemoryStore()
+
+def _build_store() -> tuple[Any, str]:
+    """Redis if it is configured, memory only if it is genuinely absent.
+
+    WHY THIS IS NOT A PREFERENCE. The first deployment of this service used MemoryStore, and
+    real-world scenario testing found it overrunning its ceiling by 303%: 25 concurrent requests
+    were served by 25 serverless instances, each holding its own ledger, each starting empty.
+    Every instance enforced $0.05 correctly against its own slice of traffic, so there were 25
+    ceilings instead of one.
+
+    `store.py` had said so all along — "correct for one replica and useless for two, which is
+    precisely measured failure #1" — and `docs/DEPLOYMENT.md` said not to deploy it behind a
+    load balancer. I deployed it anyway and invited people to verify a property it did not have.
+
+    So the store is chosen at startup and the choice is REPORTED at /health, because a service
+    whose central guarantee depends on its backing store should not make that invisible.
+    """
+    url = os.environ.get("REDIS_URL") or os.environ.get("KV_URL")
+    if not url:
+        return MemoryStore(), "memory"
+    try:
+        import redis
+
+        client = redis.from_url(url, socket_timeout=5, socket_connect_timeout=5)
+        client.ping()
+        return RedisStore(client), "redis"
+    except Exception as exc:
+        # Deliberately does NOT silently fall back to memory. A shared ledger that quietly
+        # degrades to a per-instance one is how the 303% overrun happened in the first place;
+        # the failure has to be loud. The service still starts, so /health can report it.
+        log.error("redis configured but unreachable: %s", exc)
+        return MemoryStore(), f"memory (redis configured but UNREACHABLE: {exc})"
+
+
+_store, _store_kind = _build_store()
 _ledger = Ledger(_store, CEILINGS)
 _pricing = Pricing(PRICES)
+log.info("ledger store: %s", _store_kind)
 
 # The stub upstream. Mounted on this same app, so the proxy makes a real HTTP round trip
 # through its real client — the reserve/settle path is not shortcut for the demo.
@@ -189,11 +224,21 @@ def health() -> dict[str, Any]:
         if spent > ceiling + 1e-9:
             violations.append(f"{key}: spent {spent} exceeds ceiling {ceiling}")
 
+    shared = _store_kind == "redis"
+    if not shared:
+        violations.append(
+            f"ledger store is {_store_kind!r}, not shared across instances — the ceiling holds "
+            "per instance, not globally. See scenarios/results/2026-08-21-fusegrid-multi-instance.md"
+        )
+
     return {
         "status": "ok" if not violations else "degraded",
         "version": VERSION,
         "invariant": "committed + open reservations <= ceiling",
         "invariant_holds": not violations,
+        "ledger_store": _store_kind,
+        "ledger_shared_across_instances": shared,
+        "instance": os.environ.get("VERCEL_DEPLOYMENT_ID", "local")[-12:],
         "violations": violations,
         "open_reservations": _ledger.open_reservations,
         "budgets": {
@@ -288,6 +333,14 @@ async def demo_overrun(concurrency: int = 20) -> dict[str, Any]:
             "Reproduces bench/enforce/replay.py against this running instance. Concurrency is "
             "capped at 60 so the demo cannot be used to load the deployment."
         ),
+        "scope": (
+            "Both arms run IN THIS INSTANCE, so this measures the algorithm and not the "
+            "deployment. Whether the ceiling holds across instances depends on the ledger "
+            f"store, which is currently {_store_kind!r}. Real-world scenario testing found a "
+            "303% overrun when this ran on a per-instance memory store — see "
+            "scenarios/results/2026-08-21-fusegrid-multi-instance.md."
+        ),
+        "ledger_store": _store_kind,
     }
 
 
@@ -376,7 +429,15 @@ def reset() -> dict[str, Any]:
     to vanish while the real ceiling silently kept counting. Caught by a test asserting that
     spend recorded through the proxy is visible via the budget endpoint.
     """
-    _store.clear()
+    # RedisStore has no clear(); the demo keys are cleared by zeroing each budget instead.
+    if hasattr(_store, "clear"):
+        _store.clear()
+    else:
+        for key in CEILINGS:
+            try:
+                _store.release(key, _store.spent(key))
+            except Exception as exc:
+                log.warning("could not clear %s: %s", key, exc)
     _ledger.clear_reservations()
     log.info("demo ledger reset")
     return {"status": "reset", "budgets": CEILINGS}

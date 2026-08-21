@@ -153,11 +153,30 @@ class TestRateLimit:
 
 
 class TestHealth:
-    def test_health_asserts_the_invariant(self) -> None:
+    def test_health_reports_whether_the_ledger_is_actually_shared(self) -> None:
+        """The ceiling only holds globally if the ledger is shared across instances.
+
+        Health used to return "ok" against a per-instance memory store, which is how a 303%
+        production overrun went unnoticed: every instance was individually correct. It now
+        reports `degraded` unless the store is shared, so the status reflects the guarantee the
+        deployment can actually make rather than the one the algorithm makes.
+        """
         d = client.get("/health").json()
-        assert d["status"] == "ok"
-        assert d["invariant_holds"] is True
-        assert d["violations"] == []
+        assert "ledger_store" in d
+        assert "ledger_shared_across_instances" in d
+
+        if d["ledger_shared_across_instances"]:
+            assert d["status"] == "ok"
+            assert d["violations"] == []
+        else:
+            # No REDIS_URL in the local test environment, which is the honest answer here.
+            assert d["status"] == "degraded"
+            assert any("not shared across instances" in v for v in d["violations"])
+
+    def test_no_recorded_spend_exceeds_its_ceiling(self) -> None:
+        d = client.get("/health").json()
+        for key, budget in d["budgets"].items():
+            assert budget["spent_usd"] <= budget["ceiling_usd"] + 1e-9, key
 
     def test_health_reports_degraded_when_the_invariant_breaks(self) -> None:
         """A health check that cannot fail is decoration."""
