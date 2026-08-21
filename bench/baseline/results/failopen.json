@@ -1,0 +1,44 @@
+{
+  "ceiling_usd": 1.0,
+  "cost_per_call_usd": 0.05,
+  "concurrency": 40,
+  "expected_allowed": 20,
+  "patterns": [
+    {
+      "name": "check-then-act race",
+      "mechanism": "read counter \u2192 decide \u2192 spend",
+      "calls_allowed": 40,
+      "final_spend_usd": 2.0,
+      "overrun_pct": 100.0,
+      "failed_open": true,
+      "detail": "40 concurrent requests all read a value under the ceiling before any had written back. 40 were permitted."
+    },
+    {
+      "name": "post-hoc accounting",
+      "mechanism": "call upstream \u2192 then record cost",
+      "calls_allowed": 20,
+      "final_spend_usd": 1.95,
+      "overrun_pct": 95.0,
+      "failed_open": true,
+      "detail": "Sequential, not even concurrent. The ceiling is checked against state that excludes the in-flight call, so a request approved with headroom to spare can still blow through it \u2014 real completion costs vary by an order of magnitude and are unknowable before the call."
+    },
+    {
+      "name": "best-effort recording",
+      "mechanism": "ledger write fails \u2192 continue anyway",
+      "calls_allowed": 40,
+      "final_spend_usd": 2.0,
+      "overrun_pct": 100.0,
+      "failed_open": true,
+      "detail": "Ledger recorded 0.00 while the provider billed 2.00. 40 write failures were swallowed. Enforcement is unbounded for as long as the store is down."
+    },
+    {
+      "name": "unpriced model fallback",
+      "mechanism": "model missing from price table \u2192 cost 0.0",
+      "calls_allowed": 40,
+      "final_spend_usd": 2.0,
+      "overrun_pct": 100.0,
+      "failed_open": true,
+      "detail": "All 40 calls passed the ceiling check at zero cost. Actual spend 2.00. The ledger believes it spent 0.00."
+    }
+  ]
+}
