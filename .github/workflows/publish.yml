@@ -1,0 +1,100 @@
+name: publish
+
+# Publishes to PyPI on a version tag, using trusted publishing — no API token is stored anywhere.
+# GitHub mints a short-lived OIDC token; PyPI verifies it came from this repo and this workflow.
+#
+# A PyPI version can NEVER be re-uploaded. Every guard below exists because the mistake is permanent.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and check, publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true }
+
+      - name: sync
+        run: uv sync --all-extras
+
+      # Every gate, before anything is built. Publishing a package whose own tests fail would be
+      # unfixable — the version is burned either way.
+      - name: gates
+        run: |
+          uv run ruff check .
+          uv run mypy . --ignore-missing-imports
+          uv run pytest -q
+
+      # THE GUARD THAT MATTERS. A tag of v0.4.0 against `version = "0.3.0"` in pyproject.toml would
+      # publish 0.3.0 — silently, permanently, and under a tag that claims otherwise. Both of these
+      # projects sat at version = "0.0.0" while tagged v0.2 and v0.3, so this is not hypothetical.
+      - name: the tag must match the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(uv run python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "tag=$tag  pyproject=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match pyproject version $pkg — refusing to publish"
+            exit 1
+          fi
+          case "$pkg" in
+            0.0.0) echo "::error::refusing to publish a placeholder version"; exit 1 ;;
+          esac
+
+      - name: build
+        run: uv build
+
+      # twine's metadata check catches a malformed long_description, which PyPI rejects at upload —
+      # after the version is consumed on some mirrors. Cheaper to find here.
+      - name: check the artifacts
+        run: uv run --with twine twine check dist/*
+
+      # Install the built wheel into a clean environment and import it. A wheel that builds but does
+      # not import is exactly what onewayglass shipped: no __init__.py, so it installed as a
+      # namespace package, imported without error, and exposed nothing.
+      - name: the wheel must import from a clean environment
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/*.whl
+          /tmp/verify/bin/python - <<'PY'
+          import importlib, pathlib, tomllib
+          name = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["name"]
+          mod = importlib.import_module(name)
+          assert mod.__file__ is not None, f"{name} installed as a namespace package — no __init__.py"
+          public = [n for n in dir(mod) if not n.startswith("_")]
+          assert public, f"{name} imports but exposes nothing"
+          print(f"{name}: {len(public)} public names, __file__ set")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist/ }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only a tag publishes. A manual dispatch builds and verifies, so the whole path can be
+    # exercised without consuming a version.
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: pypi
+    permissions:
+      id-token: write   # required for trusted publishing; nothing else needs it
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Fails loudly rather than skipping if the version is already on PyPI. A silent skip
+          # would make a botched release look successful.
+          skip-existing: false
