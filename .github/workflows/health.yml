@@ -1,0 +1,123 @@
+name: health
+
+# The automation floor. Runs whether or not anyone is looking.
+#
+# WHY THIS EXISTS: nine dependency PRs and four unread CVEs accumulated across these repos while
+# CI was green, because nothing was scheduled and nobody reads `npm ci` output. A gate that only
+# fires when a human pushes is not a floor.
+on:
+  schedule:
+    # 06:00 IST = 00:30 UTC. Deliberately not on the hour: GitHub queues scheduled jobs at
+    # popular times and delays can run to tens of minutes.
+    - cron: "30 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true }
+
+      - name: sync
+        run: uv sync --all-extras
+
+      # pip-audit resolves against PyPI's advisory feed. Non-zero exit means a finding, so the
+      # step must not fail the job — the report is the product, and a red job with no summary
+      # tells the reader nothing.
+      - name: audit dependencies
+        id: audit
+        continue-on-error: true
+        run: |
+          uv run --with pip-audit pip-audit --strict --format json > audit.json 2>audit.err || true
+          python - <<'PY'
+          import json, os, pathlib
+          raw = pathlib.Path("audit.json").read_text().strip()
+          findings = []
+          if raw:
+              data = json.loads(raw)
+              deps = data.get("dependencies", data if isinstance(data, list) else [])
+              for d in deps:
+                  for v in d.get("vulns", []):
+                      findings.append({
+                          "name": d.get("name"), "version": d.get("version"),
+                          "id": v.get("id"), "fix": ", ".join(v.get("fix_versions") or []) or "none",
+                      })
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a") as fh:
+              fh.write(f"count={len(findings)}\n")
+              fh.write("json<<EOF\n" + json.dumps(findings) + "\nEOF\n")
+          summary = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          if findings:
+              summary.write_text(
+                  "## Vulnerable dependencies\n\n| Package | Installed | Advisory | Fixed in |\n|---|---|---|---|\n"
+                  + "\n".join(f"| {f['name']} | {f['version']} | {f['id']} | {f['fix']} |" for f in findings)
+                  + "\n"
+              )
+          else:
+              summary.write_text("## Dependencies\n\nNo known vulnerabilities.\n")
+          PY
+
+      - name: gates
+        id: gates
+        continue-on-error: true
+        run: |
+          fail=""
+          uv run ruff check . || fail="$fail lint"
+          uv run mypy . --ignore-missing-imports || fail="$fail types"
+          uv run pytest -q || fail="$fail tests"
+          echo "failed=${fail# }" >> "$GITHUB_OUTPUT"
+          [ -z "$fail" ] || echo "### Failing gates:$fail" >> "$GITHUB_STEP_SUMMARY"
+
+      # An issue, not a silent log. A scheduled run nobody is notified about is a cron job that
+      # writes to /dev/null — which is how the CVEs went unread in the first place.
+      - name: raise an issue if anything is wrong
+        if: steps.audit.outputs.count != '0' || steps.gates.outputs.failed != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COUNT: ${{ steps.audit.outputs.count }}
+          FINDINGS: ${{ steps.audit.outputs.json }}
+          FAILED: ${{ steps.gates.outputs.failed }}
+        run: |
+          python - <<'PY' > body.md
+          import json, os
+          count = os.environ.get("COUNT", "0")
+          failed = os.environ.get("FAILED", "")
+          print("Raised by the daily `health` workflow.\n")
+          if failed:
+              print(f"**Failing gates:** {failed}\n")
+          if count != "0":
+              rows = json.loads(os.environ.get("FINDINGS") or "[]")
+              print(f"**{count} vulnerable dependenc{'y' if count == '1' else 'ies'}:**\n")
+              print("| Package | Installed | Advisory | Fixed in |")
+              print("|---|---|---|---|")
+              for f in rows:
+                  print(f"| `{f['name']}` | {f['version']} | {f['id']} | {f['fix']} |")
+              print()
+          print("Reproduce locally:\n")
+          print("```bash\nuv sync --all-extras\nuv run --with pip-audit pip-audit --strict\nuv run pytest -q\n```")
+          PY
+          # One rolling issue per repo rather than one per day: 365 near-identical issues is a
+          # backlog nobody reads, which is the failure mode this workflow exists to prevent.
+          existing=$(gh issue list --label health --state open --limit 1 --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file body.md
+          else
+            gh label create health --color B60205 --description "Raised by the daily health workflow" 2>/dev/null || true
+            gh issue create --title "health: dependency or gate failure" --label health --body-file body.md
+          fi
+
+      - name: close the issue when everything is green
+        if: steps.audit.outputs.count == '0' && steps.gates.outputs.failed == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for n in $(gh issue list --label health --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Green as of $(date -u +%Y-%m-%dT%H:%MZ): no vulnerable dependencies, all gates passing."
+          done
