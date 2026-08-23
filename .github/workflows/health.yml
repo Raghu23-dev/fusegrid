@@ -75,10 +75,57 @@ jobs:
           echo "failed=${fail# }" >> "$GITHUB_OUTPUT"
           [ -z "$fail" ] || echo "### Failing gates:$fail" >> "$GITHUB_STEP_SUMMARY"
 
+      # A PULL REQUEST NOBODY MERGED IS WORK THAT DID NOT SHIP.
+      #
+      # health/digest.py in the portfolio repo used to count open PRs across all four flagships.
+      # It was deleted when its Discord relay was removed, and nothing replaced it, so a PR left
+      # open on a repo nobody happened to visit had no way to announce itself. Nine had piled up
+      # once before, unnoticed.
+      #
+      # Reported per repo rather than centrally on purpose: a cross-repo query needs a personal
+      # access token, and a stored credential is a worse trade than four notifications. Each repo
+      # already opens exactly one rolling issue, which is where this lands.
+      #
+      # Only PRs older than the threshold count. A PR opened an hour ago is work in progress, not
+      # a backlog, and flagging it would train the reader to ignore this.
+      - name: a pull request left open too long
+        id: prs
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STALE_AFTER_HOURS: "48"
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, subprocess, datetime
+          limit = int(os.environ["STALE_AFTER_HOURS"])
+          out = subprocess.run(
+              ["gh", "pr", "list", "--limit", "50", "--json",
+               "number,title,createdAt,isDraft,author"],
+              capture_output=True, text=True, timeout=60,
+          )
+          if out.returncode != 0:
+              # Say so rather than reporting zero. A failed query that prints "0 stale" is the
+              # silent-green failure this whole workflow exists to prevent.
+              print("stale=query-failed")
+              raise SystemExit
+          prs = json.loads(out.stdout or "[]")
+          now = datetime.datetime.now(datetime.timezone.utc)
+          stale = []
+          for pr in prs:
+              if pr.get("isDraft"):
+                  continue          # a draft is explicitly not ready
+              created = datetime.datetime.fromisoformat(pr["createdAt"].replace("Z", "+00:00"))
+              hours = (now - created).total_seconds() / 3600
+              if hours >= limit:
+                  stale.append(f"#{pr['number']} ({int(hours // 24)}d) {pr['title'][:60]}")
+          print(f"stale={'; '.join(stale)}")
+          PY
+          echo "### Open PRs: $(gh pr list --limit 50 --json number --jq 'length')" >> "$GITHUB_STEP_SUMMARY"
+
       # An issue, not a silent log. A scheduled run nobody is notified about is a cron job that
       # writes to /dev/null — which is how the CVEs went unread in the first place.
       - name: raise an issue if anything is wrong
-        if: steps.audit.outputs.count != '0' || steps.gates.outputs.failed != ''
+        if: steps.audit.outputs.count != '0' || steps.gates.outputs.failed != '' || steps.prs.outputs.stale != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COUNT: ${{ steps.audit.outputs.count }}
@@ -114,7 +161,7 @@ jobs:
           fi
 
       - name: close the issue when everything is green
-        if: steps.audit.outputs.count == '0' && steps.gates.outputs.failed == ''
+        if: steps.audit.outputs.count == '0' && steps.gates.outputs.failed == '' && steps.prs.outputs.stale == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
