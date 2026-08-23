@@ -11,6 +11,12 @@ curl "https://fusegrid.vercel.app/demo/overrun?concurrency=20"
 # enforced: $0.10, 0% over, 5 allowed / 15 refused
 ```
 
+**Install:**
+
+```bash
+pip install fusegrid
+```
+
 You configure a spend limit, exceed it, and nothing stops the request — you find out on
 the invoice. This is not a bug in one product; it is a property of enforcing a limit
 against a cost that is unknowable until after the money is spent.
