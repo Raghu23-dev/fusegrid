@@ -53,6 +53,23 @@ jobs:
             0.0.0) echo "::error::refusing to publish a placeholder version"; exit 1 ;;
           esac
 
+      # THE GUARD THE RENAME PROVED WAS MISSING. The check above compares the tag to the
+      # VERSION and says nothing about the NAME. mcpgantlet already carried a v0.4.0 tag from
+      # before it was renamed from mcpgauntlet; that tagged tree declares `name = "mcpgauntlet"`
+      # at version 0.4.0, so the version check passes and the upload would attempt a name no
+      # pending publisher exists for — or, worse, one PyPI had already refused.
+      #
+      # A package name is not something a release should be able to change by accident.
+      - name: the distribution name must match this repository
+        run: |
+          pkg=$(uv run python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['name'])")
+          repo="${GITHUB_REPOSITORY##*/}"
+          echo "pyproject name=$pkg  repo=$repo"
+          if [ "$pkg" != "$repo" ]; then
+            echo "::error::pyproject declares '$pkg' but this repo is '$repo' — the pending publisher is registered per repo, so refusing to publish"
+            exit 1
+          fi
+
       - name: build
         run: uv build
 
