@@ -95,7 +95,7 @@ jobs:
           print(f"{name}: {len(public)} public names, __file__ set")
           PY
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: dist, path: dist/ }
 
   publish:
